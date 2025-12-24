@@ -13,6 +13,7 @@ from .models import (
     EnrichmentRedisData,
     Contact,
     CompanyResult,
+    ScraperAggregatedOutput,
 )
 from .redis_client import (
     redis_client,
@@ -38,27 +39,51 @@ def get_redis_data(task_id: str) -> EnrichmentRedisData:
 
 
 def filter_low_confidence_contacts(company_result: dict) -> CompanyResult:
-    """Filter out contacts with confidence score below threshold."""
-    contacts = company_result.get("contacts", [])
+    """Filter out contacts with confidence score below threshold and flatten to Contact model."""
+    try:
+        scraper_output = ScraperAggregatedOutput(**company_result)
+    except Exception as e:
+        logger.warning(f"Failed to parse as ScraperAggregatedOutput: {e}, using raw dict")
+        # Fallback to raw dict handling for backwards compatibility
+        contacts = company_result.get("contacts", [])
+        filtered_contacts = []
+        for contact in contacts:
+            confidence_score = contact.get("confidenceScore", 0)
+            if confidence_score >= MIN_CONFIDENCE_SCORE:
+                filtered_contact = Contact(
+                    firstName=contact.get("firstName", {}).get("value") if isinstance(contact.get("firstName"), dict) else contact.get("firstName"),
+                    lastName=contact.get("lastName", {}).get("value") if isinstance(contact.get("lastName"), dict) else contact.get("lastName"),
+                    email=contact.get("email", {}).get("value") if isinstance(contact.get("email"), dict) else contact.get("email"),
+                    phone=contact.get("phone", {}).get("value") if isinstance(contact.get("phone"), dict) else contact.get("phone"),
+                    linkedinUrl=contact.get("linkedinUrl", {}).get("value") if isinstance(contact.get("linkedinUrl"), dict) else contact.get("linkedinUrl"),
+                    role=contact.get("role", {}).get("value") if isinstance(contact.get("role"), dict) else contact.get("role"),
+                    confidenceScore=confidence_score,
+                )
+                filtered_contacts.append(filtered_contact)
+        return CompanyResult(
+            companyId=company_result.get("companyId"),
+            companyName=company_result.get("companyName"),
+            contacts=filtered_contacts,
+        )
     
+    # Use typed models
     filtered_contacts = []
-    for contact in contacts:
-        confidence_score = contact.get("confidenceScore", 0)
-        if confidence_score >= MIN_CONFIDENCE_SCORE:
+    for contact in scraper_output.contacts:
+        if contact.confidenceScore >= MIN_CONFIDENCE_SCORE:
             filtered_contact = Contact(
-                firstName=contact.get("firstName", {}).get("value") if isinstance(contact.get("firstName"), dict) else contact.get("firstName"),
-                lastName=contact.get("lastName", {}).get("value") if isinstance(contact.get("lastName"), dict) else contact.get("lastName"),
-                email=contact.get("email", {}).get("value") if isinstance(contact.get("email"), dict) else contact.get("email"),
-                phone=contact.get("phone", {}).get("value") if isinstance(contact.get("phone"), dict) else contact.get("phone"),
-                linkedinUrl=contact.get("linkedinUrl", {}).get("value") if isinstance(contact.get("linkedinUrl"), dict) else contact.get("linkedinUrl"),
-                role=contact.get("role", {}).get("value") if isinstance(contact.get("role"), dict) else contact.get("role"),
-                confidenceScore=confidence_score,
+                firstName=contact.firstName.value if contact.firstName else None,
+                lastName=contact.lastName.value if contact.lastName else None,
+                email=contact.email.value if contact.email else None,
+                phone=contact.phone.value if contact.phone else None,
+                linkedinUrl=contact.linkedinUrl.value if contact.linkedinUrl else None,
+                role=contact.role.value if contact.role else None,
+                confidenceScore=contact.confidenceScore,
             )
             filtered_contacts.append(filtered_contact)
     
     return CompanyResult(
-        companyId=company_result.get("companyId"),
-        companyName=company_result.get("companyName"),
+        companyId=scraper_output.companyId,
+        companyName=scraper_output.companyName,
         contacts=filtered_contacts,
     )
 
@@ -176,13 +201,11 @@ def process_enrichment_aggregation(input_data: EnrichmentAggregatorInput):
         if webhook_url:
             logger.info(f"Sending {len(filtered_results)} company results to webhook", extra={"task_id": task_id})
             try:
-                # print out final result
-                logger.info(f"Final result: {json_body}", extra={"task_id": task_id})
-                # response = requests.post(webhook_url, json=json_body, timeout=30)
-                # if response.status_code == 200:
-                #     logger.info(f"Successfully sent results to webhook", extra={"task_id": task_id})
-                # else:
-                #     logger.error(f"Failed to send results to webhook. Status: {response.status_code}", extra={"task_id": task_id})
+                response = requests.post(webhook_url, json=json_body, timeout=30)
+                if response.status_code == 200:
+                    logger.info(f"Successfully sent results to webhook", extra={"task_id": task_id})
+                else:
+                    logger.error(f"Failed to send results to webhook. Status: {response.status_code}", extra={"task_id": task_id})
             except Exception as e:
                 logger.error(f"Error sending to webhook: {e}", extra={"task_id": task_id})
 

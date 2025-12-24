@@ -13,8 +13,46 @@ class EnrichmentInput(BaseModel):
     formData: List[CompanyInput] = Field(..., description="List of companies to research")
 
 
+# --- CrewAI Service Output Models (input to aggregator) ---
+
+class Source(BaseModel):
+    """Source information for a data point."""
+    description: Optional[str] = None
+    url: Optional[str] = None
+
+
+class ValueWithConfidence(BaseModel):
+    """A value with its sources and confidence score."""
+    value: Optional[str] = None
+    sources: List[Source] = Field(default_factory=list)
+    confidence: Optional[float] = None
+
+
+class ContactWithSources(BaseModel):
+    """Contact information with sources and confidence per field."""
+    firstName: Optional[ValueWithConfidence] = None
+    lastName: Optional[ValueWithConfidence] = None
+    email: Optional[ValueWithConfidence] = None
+    phone: Optional[ValueWithConfidence] = None
+    linkedinUrl: Optional[ValueWithConfidence] = None
+    role: Optional[ValueWithConfidence] = None
+    confidenceScore: float = Field(..., ge=0.0, le=1.0)
+
+
+class ScraperAggregatedOutput(BaseModel):
+    """Output from CrewAI scraper service."""
+    companyId: int
+    companyName: str
+    contacts: List[ContactWithSources] = Field(default_factory=list)
+
+    class Config:
+        extra = "ignore"
+
+
+# --- Flattened Output Models (sent to webhook) ---
+
 class Contact(BaseModel):
-    """Contact information for an HR/executive person."""
+    """Flattened contact information for webhook output."""
     firstName: Optional[str] = None
     lastName: Optional[str] = None
     email: Optional[str] = None
@@ -25,7 +63,7 @@ class Contact(BaseModel):
 
 
 class CompanyResult(BaseModel):
-    """Result for a single company with all found contacts."""
+    """Flattened result for webhook output."""
     companyId: int
     companyName: str
     contacts: List[Contact] = Field(default_factory=list)
