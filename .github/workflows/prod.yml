@@ -1,0 +1,55 @@
+name: Build and Deploy to Azure Dev Slot
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PROJECT_NAME: snuffle-scraper-prod
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.REGISTRY_LOGIN_SERVER }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.PROJECT_NAME }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.PROJECT_NAME }}:latest
+          cache-to: type=inline
+
+      - name: Deploy to Azure Web App Prod
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: app-snuffle-scraper-enrichment
+          images: ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.PROJECT_NAME }}:${{ github.sha }}
+
+      - name: Update latest tag for prod
+        run: |
+          docker pull ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.PROJECT_NAME }}:${{ github.sha }}
+          docker tag ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.PROJECT_NAME }}:${{ github.sha }} ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.PROJECT_NAME }}:latest
+          docker push ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ env.PROJECT_NAME }}:latest
