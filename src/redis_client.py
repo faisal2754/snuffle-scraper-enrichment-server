@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 TASK_RESULT_TTL = 60 * 60 * 600  # 600 hours
-MIN_CONFIDENCE_SCORE = 50
+MIN_CONFIDENCE_SCORE = 0.5
 
 try:
     redis_client = redis.from_url(REDIS_URL)

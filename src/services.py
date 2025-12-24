@@ -8,9 +8,9 @@ from pydantic import ValidationError
 from azure.servicebus import ServiceBusClient, ServiceBusMessage, TransportType
 
 from .models import (
-    ScraperInput,
-    ScraperAggregatorInput,
-    ScraperRedisData,
+    EnrichmentInput,
+    EnrichmentAggregatorInput,
+    EnrichmentRedisData,
     Contact,
     CompanyResult,
 )
@@ -24,15 +24,15 @@ from .redis_client import (
 logger = logging.getLogger(__name__)
 
 
-def get_redis_data(task_id: str) -> ScraperRedisData:
-    """Get data from Redis and parse it into the ScraperRedisData model."""
+def get_redis_data(task_id: str) -> EnrichmentRedisData:
+    """Get data from Redis and parse it into the EnrichmentRedisData model."""
     redis_data = redis_client.get(f"task:{task_id}")
     if not redis_data:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
     data = json.loads(redis_data)
     try:
-        return ScraperRedisData(**data)
+        return EnrichmentRedisData(**data)
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=f"Invalid data format for task {task_id}: {str(e)}")
 
@@ -63,14 +63,14 @@ def filter_low_confidence_contacts(company_result: dict) -> CompanyResult:
     )
 
 
-def process_enqueue_scraper(input_data: ScraperInput, task_id: str):
-    """Background task to enqueue company research jobs to Service Bus."""
-    queue_name = os.getenv("QUEUE_SCRAPER_RESEARCH")
+def process_enqueue_enrichment(input_data: EnrichmentInput, task_id: str):
+    """Background task to enqueue company enrichment jobs to Service Bus."""
+    queue_name = os.getenv("QUEUE_ENRICHMENT")
     connection_string = os.getenv("SERVICEBUS_CONNECTION_STRING")
     webhook_url = os.getenv("WEBHOOK_URL")
     
     if not queue_name or not connection_string:
-        logger.error("Missing QUEUE_SCRAPER_RESEARCH or SERVICEBUS_CONNECTION_STRING", extra={"task_id": task_id})
+        logger.error("Missing QUEUE_ENRICHMENT or SERVICEBUS_CONNECTION_STRING", extra={"task_id": task_id})
         return
     
     companies = input_data.formData
@@ -132,13 +132,13 @@ def process_enqueue_scraper(input_data: ScraperInput, task_id: str):
             time.sleep(5 + (5 * attempt))
 
 
-def process_scraper_aggregation(input_data: ScraperAggregatorInput):
-    """Background task to aggregate scraper results."""
+def process_enrichment_aggregation(input_data: EnrichmentAggregatorInput):
+    """Background task to aggregate enrichment results."""
     task_id = input_data.task_id
     data = input_data.data
     error = input_data.error
     
-    logger.info(f"Processing scraper aggregation for task:{task_id}", extra={"task_id": task_id})
+    logger.info(f"Processing enrichment aggregation for task:{task_id}", extra={"task_id": task_id})
     
     if error:
         logger.error(f"Error received for task {task_id}: {error}", extra={"task_id": task_id})
@@ -176,11 +176,15 @@ def process_scraper_aggregation(input_data: ScraperAggregatorInput):
         if webhook_url:
             logger.info(f"Sending {len(filtered_results)} company results to webhook", extra={"task_id": task_id})
             try:
-                response = requests.post(webhook_url, json=json_body, timeout=30)
-                if response.status_code == 200:
-                    logger.info(f"Successfully sent results to webhook", extra={"task_id": task_id})
-                else:
-                    logger.error(f"Failed to send results to webhook. Status: {response.status_code}", extra={"task_id": task_id})
+                # save json to disk
+                with open(f"results_{task_id}.json", "w") as f:
+                    json.dump(json_body, f)
+                    logger.info(f"Saved results to disk", extra={"task_id": task_id})
+                # response = requests.post(webhook_url, json=json_body, timeout=30)
+                # if response.status_code == 200:
+                #     logger.info(f"Successfully sent results to webhook", extra={"task_id": task_id})
+                # else:
+                #     logger.error(f"Failed to send results to webhook. Status: {response.status_code}", extra={"task_id": task_id})
             except Exception as e:
                 logger.error(f"Error sending to webhook: {e}", extra={"task_id": task_id})
 
