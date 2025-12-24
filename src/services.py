@@ -176,10 +176,8 @@ def process_enrichment_aggregation(input_data: EnrichmentAggregatorInput):
         if webhook_url:
             logger.info(f"Sending {len(filtered_results)} company results to webhook", extra={"task_id": task_id})
             try:
-                # save json to disk
-                with open(f"results_{task_id}.json", "w") as f:
-                    json.dump(json_body, f)
-                    logger.info(f"Saved results to disk", extra={"task_id": task_id})
+                # print out final result
+                logger.info(f"Final result: {json_body}", extra={"task_id": task_id})
                 # response = requests.post(webhook_url, json=json_body, timeout=30)
                 # if response.status_code == 200:
                 #     logger.info(f"Successfully sent results to webhook", extra={"task_id": task_id})
